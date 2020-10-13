@@ -49,6 +49,8 @@ var moduleToLibDictionary = map[string]string{
 	"libSceCamera":               "libSceCamera.prx",
 	"libSceCommonDialog":         "libSceCommonDialog.prx",
 	"libSceConvertKeycode":       "libSceConvertKeycode.prx",
+  "libSceDeviceService":        "libSceMbus.prx",
+	"libSceDbgKeyboard":          "libSceKeyboard.prx",
 	"libSceFios2":                "libSceFios2.prx",
 	"libSceFont":                 "libSceFont-module.prx",
 	"libSceFontFt":               "libSceFontFt-module.prx",
@@ -59,6 +61,10 @@ var moduleToLibDictionary = map[string]string{
 	"libSceJpegDec":              "libSceJpegDec.prx",
 	"libSceJpegEnc":              "libSceJpegEnc.prx",
 	"libSceKeyboard":             "libSceKeyboard.prx",
+  "libSceLibcInternal":         "libSceLibcInternal.prx",
+  "libSceLibcInternalExt":      "libSceLibcInternal.prx",
+  "libSceMbus":                 "libSceMbus.prx",
+  "libSceMbusDebug":            "libSceMbus.prx",
 	"libSceMouse":                "libSceMouse.prx",
 	"libSceNetCtl":               "libSceNetCtl.prx",
 	"libSceNpCommon":             "libSceNpCommon.prx",
@@ -86,6 +92,14 @@ var moduleToLibDictionary = map[string]string{
 	"libSceWebBrowserDialog":     "libSceWebBrowserDialog.prx",
 	"libSceZlib":                 "libSceZlib.prx",
 	"libSceFreeType":             "libSceFreeType.prx",
+}
+
+// moduleDependencyDictionary contains a mapping of module names to its dependency module
+var moduleDependencyDictionary = map[string]string{
+  "libSceDeviceService":        "libSceMbus",
+	"libSceDbgKeyboard":          "libSceKeyboard",
+  "libSceLibcInternalExt":      "libSceLibcInternal",
+  "libSceMbusDebug":            "libSceMbus",
 }
 
 var (
@@ -160,6 +174,12 @@ func (orbisElf *OrbisElf) GenerateLibrarySymbolDictionary() error {
 
 		// Add it to the dictionary
 		purifiedLibrary := strings.Replace(library, ".so", "", 1)
+
+    // Dependencies are added first
+    dependencyLibrary := moduleDependencyDictionary[purifiedLibrary]
+    if dependencyLibrary != "" {
+		  orbisElf.ModuleSymbolDictionary.Set(dependencyLibrary, []string{})
+    }
 		orbisElf.ModuleSymbolDictionary.Set(purifiedLibrary, []string{})
 	}
 
@@ -446,6 +466,7 @@ func writeNIDTable(orbisElf *OrbisElf, segmentData *[]byte) (uint64, error) {
 	// Each symbol might need an NID entry
 	for _, symbol := range symbols {
 		symbolModuleIndex := -1
+    dependencyModuleIndex := -1
 
 		// Skip symbols that have a valid section index - they're defined in the ELF and are not external
 		if symbol.Section != elf.SHN_UNDEF {
@@ -458,6 +479,9 @@ func writeNIDTable(orbisElf *OrbisElf, segmentData *[]byte) (uint64, error) {
 
 			if contains(moduleSymbols, symbol.Name) {
 				symbolModuleIndex = moduleIndex
+        if moduleDependencyDictionary[module.(string)] != "" {
+          dependencyModuleIndex = moduleIndex
+        }
 				break
 			}
 		}
@@ -467,7 +491,11 @@ func writeNIDTable(orbisElf *OrbisElf, segmentData *[]byte) (uint64, error) {
 		}
 
 		// Build the NID and insert it into the table
-		nidTableBuff.WriteString(buildNIDEntry(symbol.Name, 1+symbolModuleIndex))
+    if dependencyModuleIndex > 0 {
+		  nidTableBuff.WriteString(buildNIDEntry2(symbol.Name, 1 + symbolModuleIndex, dependencyModuleIndex))
+    } else {
+		  nidTableBuff.WriteString(buildNIDEntry(symbol.Name, 1 + symbolModuleIndex))
+    }
 	}
 
 	if libcModuleIndex >= 0 {
@@ -503,6 +531,8 @@ func buildNIDEntry(symbolName string, moduleId int) string {
 	// Allow unknown symbols and allow arbitrary NIDs if the prefix is `__PS4_NID_`
 	if strings.HasPrefix(symbolName, "__PS4_NID_") {
 		nid = strings.Split(symbolName, "_NID_")[1]
+		nid = strings.Replace(nid, "_plus", "+", -1)
+		nid = strings.Replace(nid, "_minus", "-", -1)
 	} else {
 		nid = calculateNID(symbolName)
 	}
@@ -510,6 +540,17 @@ func buildNIDEntry(symbolName string, moduleId int) string {
 	// Format: [NID Hash] + '#' + [Module Index] + '#' + [Library Index]
 	moduleIdChar := string(indexEncodingTable[moduleId])
 	libraryIdChar := moduleIdChar
+
+	nid += "#" + moduleIdChar + "#" + libraryIdChar + "\x00"
+	return nid
+}
+
+func buildNIDEntry2(symbolName string, moduleId int, libraryId int) string {
+	nid := calculateNID(symbolName)
+
+	// Format: [NID Hash] + '#' + [Module Index] + '#' + [Library Index]
+	moduleIdChar := string(indexEncodingTable[moduleId])
+	libraryIdChar := string(indexEncodingTable[libraryId])
 
 	nid += "#" + moduleIdChar + "#" + libraryIdChar + "\x00"
 	return nid
