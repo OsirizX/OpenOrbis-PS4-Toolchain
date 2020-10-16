@@ -7,10 +7,10 @@ struct stat {
 	uint32_t st_dev;
 	uint32_t st_ino;
 	uint16_t st_mode;
-	nlink_t st_nlink;
-	uid_t st_uid;
-	gid_t st_gid;
-	dev_t st_rdev;
+	uint16_t st_nlink;
+	uint32_t st_uid;
+	uint32_t st_gid;
+	uint32_t st_rdev;
 	struct timespec st_atim;
 	struct timespec st_mtim;
 	struct timespec st_ctim;
